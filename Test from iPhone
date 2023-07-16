@@ -1,0 +1,11 @@
+# Connect to your vCenter server
+Connect-VIServer -Server "vcenter-server-address" -User "your-username" -Password "your-password"
+
+# Get a list of all VMs on the connected vCenter server
+$vmList = Get-VM
+
+# Display the list of VMs
+$vmList | Select-Object Name, PowerState, NumCPU, MemoryGB, ProvisionedSpaceGB, UsedSpaceGB
+
+# Disconnect from the vCenter server
+Disconnect-VIServer -Server "vcenter-server-address" -Confirm:$false
