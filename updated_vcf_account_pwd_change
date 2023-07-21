@@ -1,0 +1,57 @@
+# Prompt for vCenter server details
+$vCenterServer = Read-Host "Enter vCenter server name (e.g., vcenter1.example.com)"
+$vCenterUsername = Read-Host "Enter vCenter username"
+$vCenterPassword = Read-Host -AsSecureString "Enter vCenter password"
+
+# Connect to the vCenter server
+Connect-VIServer -Server $vCenterServer -User $vCenterUsername -Password (ConvertTo-PlainText $vCenterPassword)
+
+# Prompt for the new password
+$newPassword = Read-Host -AsSecureString "Enter the new password"
+
+# Define the report array
+$report = @()
+
+# Get all ESXi hosts from the vCenter server
+$esxiHosts = Get-VMHost
+
+# Iterate through each ESXi host
+foreach ($esxiHost in $esxiHosts) {
+    $esxiHostName = $esxiHost.Name
+    $localAccount = "vcf-svc-$($esxiHost.Name.Split('.')[0])"
+
+    $changeStatus = $null
+
+    # Retrieve the local account
+    $account = Get-VMHostAccount -VMHost $esxiHost | Where-Object {$_.Id -eq $localAccount}
+
+    if ($account) {
+        try {
+            # Set the new password for the local account using the FQDN of the host
+            Set-VMHostAccount -UserAccount $account -Password (ConvertTo-PlainText $newPassword) -Confirm:$false
+
+            $changeStatus = "Success"
+        } catch {
+            $changeStatus = "Failed"
+        }
+
+        $reportEntry = [PSCustomObject]@{
+            "vCenterServer" = $vCenterServer
+            "ESXiHost" = $esxiHostName
+            "Account" = $localAccount
+            "Status" = $changeStatus
+        }
+
+        $report += $reportEntry
+
+        Write-Host "Password change $changeStatus for account '$localAccount' on host '$esxiHostName'."
+    } else {
+        Write-Host "Local account '$localAccount' not found on host '$esxiHostName'."
+    }
+}
+
+# Disconnect from the vCenter server
+Disconnect-VIServer -Server $vCenterServer -Confirm:$false
+
+# Generate report
+$report | Export-Csv -Path "PasswordChangeReport.csv" -NoTypeInformation
