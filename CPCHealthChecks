@@ -1,0 +1,123 @@
+# Parameters (Update these with your values)
+$tenantId = "your-tenant-id"
+$clientId = "your-client-id"
+$clientSecret = "your-client-secret"
+$logFilePath = "C:\Logs\IntuneHealthCheck.log"  # Update log file path
+$sendEmail = $true  # Set to $false to disable email notifications
+$emailTo = "admin@example.com"
+$emailFrom = "intune-monitor@example.com"
+$smtpServer = "smtp.example.com"
+$smtpPort = 587
+$smtpUsername = "your-smtp-username"
+$smtpPassword = "your-smtp-password"
+
+# Function to write to log file
+function Write-Log {
+    param ([string]$message)
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    "$timestamp - $message" | Out-File -FilePath $logFilePath -Append
+}
+
+# Ensure log directory exists
+$logDir = Split-Path $logFilePath -Parent
+if (-not (Test-Path $logDir)) {
+    New-Item -ItemType Directory -Path $logDir | Out-Null
+}
+
+# Get Access Token
+try {
+    $body = @{
+        grant_type    = "client_credentials"
+        client_id     = $clientId
+        client_secret = $clientSecret
+        scope         = "https://graph.microsoft.com/.default"
+    }
+    $tokenResponse = Invoke-RestMethod -Uri "https://login.microsoftonline.com/$tenantId/oauth2/v2.0/token" -Method Post -Body $body
+    $accessToken = $tokenResponse.access_token
+    $headers = @{ Authorization = "Bearer $accessToken" }
+    Write-Log "Successfully obtained access token."
+} catch {
+    Write-Log "Error obtaining access token: $_"
+    exit 1
+}
+
+# Initialize results
+$results = [PSCustomObject]@{
+    TenantStatus         = $null
+    IntuneServiceHealth  = $null
+    Windows365Health     = $null
+    RecentMessages       = @()
+}
+
+# 1. Fetch Tenant Status
+try {
+    $tenantStatus = Invoke-RestMethod -Uri "https://graph.microsoft.com/v1.0/deviceManagement/tenantInformation" -Headers $headers
+    $results.TenantStatus = $tenantStatus.tenantStatus
+    Write-Log "Tenant Status: $($results.TenantStatus)"
+} catch {
+    $results.TenantStatus = "Error: $_"
+    Write-Log "Error fetching tenant status: $_"
+}
+
+# 2. Fetch Service Health (Intune and Windows 365)
+try {
+    $healthData = Invoke-RestMethod -Uri "https://graph.microsoft.com/v1.0/admin/serviceAnnouncement/healthOverviews" -Headers $headers
+    $intuneStatus = $healthData.value | Where-Object { $_.service -eq "Microsoft Intune" }
+    $windows365Status = $healthData.value | Where-Object { $_.service -eq "Windows 365" }
+    
+    $results.IntuneServiceHealth = $intuneStatus.status ?? "Not Found"
+    $results.Windows365Health = $windows365Status.status ?? "Not Found"
+    
+    Write-Log "Intune Service Health: $($results.IntuneServiceHealth)"
+    Write-Log "Windows 365 Service Health: $($results.Windows365Health)"
+} catch {
+    $results.IntuneServiceHealth = "Error: $_"
+    $results.Windows365Health = "Error: $_"
+    Write-Log "Error fetching service health: $_"
+}
+
+# 3. Fetch Message Center (Last 7 Days, Intune-related)
+try {
+    $messages = Invoke-RestMethod -Uri "https://graph.microsoft.com/v1.0/admin/serviceAnnouncement/messages" -Headers $headers
+    $results.RecentMessages = $messages.value | Where-Object { 
+        $_.services -contains "Microsoft Intune" -and 
+        [datetime]$_.startDateTime -gt (Get-Date).AddDays(-7)
+    } | Select-Object -Property title, startDateTime, @{Name="Message";Expression={$_.body.content}}
+    
+    if ($results.RecentMessages.Count -gt 0) {
+        Write-Log "Found $($results.RecentMessages.Count) recent Intune messages."
+        foreach ($msg in $results.RecentMessages) {
+            Write-Log "Message: $($msg.title) (Start: $($msg.startDateTime))"
+        }
+    } else {
+        Write-Log "No recent Intune messages found."
+    }
+} catch {
+    Write-Log "Error fetching Message Center: $_"
+}
+
+# 4. Prepare Email Body (if enabled)
+if ($sendEmail) {
+    $emailBody = @"
+Intune Health Check Report - $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+
+Tenant Status: $($results.TenantStatus)
+Intune Service Health: $($results.IntuneServiceHealth)
+Windows 365 Service Health: $($results.Windows365Health)
+
+Recent Message Center Updates (Last 7 Days):
+$($results.RecentMessages | ForEach-Object { "- $($_.title) (Start: $($_.startDateTime))`n  $($_.Message)`n" } | Out-String)
+"@
+
+    try {
+        $smtpCreds = New-Object System.Management.Automation.PSCredential ($smtpUsername, (ConvertTo-SecureString $smtpPassword -AsPlainText -Force))
+        Send-MailMessage -To $emailTo -From $emailFrom -Subject "Intune Health Check Report" -Body $emailBody `
+            -SmtpServer $smtpServer -Port $smtpPort -Credential $smtpCreds -UseSsl
+        Write-Log "Email sent successfully to $emailTo."
+    } catch {
+        Write-Log "Error sending email: $_"
+    }
+}
+
+# Output to Console (optional)
+$results | Format-List
