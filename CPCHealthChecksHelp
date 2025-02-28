@@ -1,0 +1,39 @@
+How to Use
+Update Variables:
+Replace $tenantId, $clientId, and $clientSecret with your Azure AD app details.
+Update $logFilePath to your desired log location.
+If using email notifications, set $sendEmail = $true and update $emailTo, $emailFrom, $smtpServer, $smtpPort, $smtpUsername, and $smtpPassword.
+Run the Script:
+Open PowerShell as an admin and execute the script.
+It will fetch tenant status, service health for Intune and Windows 365, and recent Message Center updates.
+Automation:
+Use Task Scheduler:
+Create a new task, set a trigger (e.g., hourly), and point the action to powershell.exe -File "path\to\script.ps1".
+Ensure the script runs with appropriate permissions (e.g., a service account with access to the log directory).
+What the Script Does
+Authentication: Obtains an access token using client credentials.
+Tenant Status: Queries Intune tenant status via /deviceManagement/tenantInformation.
+Service Health: Retrieves health status for "Microsoft Intune" and "Windows 365" from /admin/serviceAnnouncement/healthOverviews.
+Message Center: Fetches Intune-related messages from the last 7 days via /admin/serviceAnnouncement/messages.
+Logging: Writes results to a log file for tracking.
+Email (Optional): Sends a report to the specified email address if $sendEmail is $true.
+Output: Displays results in the console.
+Sample Output (Console)
+TenantStatus        : Active
+IntuneServiceHealth : serviceOperational
+Windows365Health    : serviceOperational
+RecentMessages      : {@{title=Update to Intune Policies; startDateTime=2025-02-25T10:00:00Z; Message=New policy rollout...}}
+
+Sample Log Entry
+2025-02-28 14:30:00 - Successfully obtained access token.
+2025-02-28 14:30:01 - Tenant Status: Active
+2025-02-28 14:30:02 - Intune Service Health: serviceOperational
+2025-02-28 14:30:02 - Windows 365 Service Health: serviceOperational
+2025-02-28 14:30:03 - Found 1 recent Intune messages.
+2025-02-28 14:30:03 - Message: Update to Intune Policies (Start: 2025-02-25T10:00:00Z)
+Notes
+Permissions: Ensure your Azure AD app has ServiceHealth.Read.All, DeviceManagementServiceConfig.Read.All, and ServiceMessage.Read.All permissions with admin consent.
+Error Handling: The script includes basic try-catch blocks; enhance as needed for your environment.
+SMTP: If your SMTP server doesn’t require authentication, remove the -Credential parameter from Send-MailMessage.
+Customization: Adjust the Message Center filter (e.g., -gt (Get-Date).AddDays(-7)) to a different time range if desired.
+This script provides a solid foundation for monitoring Intune health programmatically. Let me know if you need tweaks or additional features!
